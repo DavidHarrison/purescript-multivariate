@@ -6,8 +6,8 @@
 
 module Data.Function.Multivariate
   ( Multivariate, toMulti, fromMulti
-  , Isomorphic, to, from
   , Fn()
+  , Cons(), Nil()
   , fnCurry
   , fnUncurry
   ) where
@@ -15,7 +15,7 @@ module Data.Function.Multivariate
 import Prelude
 
 import Data.Tuple (Tuple(..))
---import Data.Iso (Iso(..))
+import Data.Iso (Iso(..))
 
 foreign import data Fn :: * -> * -> *
 
@@ -23,10 +23,13 @@ foreign import data Fn :: * -> * -> *
 foreign import getConst :: forall a. Fn Unit a -> a
 
 -- | `O(n)` where `n` is the number of arguments.
-foreign import fnCurry :: forall args ret a. Fn (Tuple a args) ret -> a -> Fn args ret
+foreign import fnCurry :: forall args ret a. Fn (Cons a args) ret -> a -> Fn args ret
 
 -- | `O(n)` where `n` is the number of arguments.
-foreign import fnUncurry :: forall args ret a. (a -> Fn args ret) -> Fn (Tuple a args) ret
+foreign import fnUncurry :: forall args ret a. (a -> Fn args ret) -> Fn (Cons a args) ret
+
+type Cons = Tuple
+type Nil = Unit
 
 -- | Currently one of two options for converting to and from multivariate
 -- | functions. This is probably more reliable in terms of avoiding type
@@ -44,35 +47,23 @@ instance multiCurry :: (Multivariate args) => Multivariate (Tuple a args) where
   toMulti f = fnUncurry \a -> toMulti \args -> f (Tuple a args)
   fromMulti fn (Tuple a args) = fromMulti (fnCurry fn a) args
 
--- | Another option for converting to and from multivariate functions. It can
--- | be more flexible than `Multivariate` in its ability to directly convert
--- | to and from PureScript functions, but may suffer from type ambiguity.
-class Isomorphic a b where
-  to   :: a -> b
-  from :: b -> a
+isoConstFnZ :: forall ret. Isomorphic ret (Fn Unit ret) where
+isoConstFnZ = Iso pure getConst
 
--- reify :: Isomorphic a b => Iso a b
--- reify = Iso to from
+isoArrFnZ :: forall ret. Iso (Unit -> ret) (Fn Unit ret)
+isoArrFnZ = Iso (pure <<< ($ unit)) (const <<< getConst)
 
-instance isoRefl :: Isomorphic a a where
-  to   = id
-  from = id
+isoCurriedFnS :: forall a b c args ret.
+                 Iso (b -> c) (Fn args ret)
+              -> Iso (Tuple a b -> c) (Fn (Cons a args) ret)
+isoCurriedFnS = Iso to from
+  where to f                   = fnUncurry \a -> to \args -> f (Tuple a args)
+        from fn (Tuple a args) = from (fnCurry fn a) args
 
-instance isoConstFnZ :: Isomorphic ret (Fn Unit ret) where
-  to   = pure
-  from = getConst
-
-instance isoArrFnZ :: Isomorphic (Unit -> ret) (Fn Unit ret) where
-  to   = pure <<< ($ unit)
-  from = const <<< getConst
-
-instance isoCurriedFnS :: (Isomorphic (b -> c) (Fn args ret)) => Isomorphic (Tuple a b -> c) (Fn (Tuple a args) ret) where
-  to f                   = fnUncurry \a -> to \args -> f (Tuple a args)
-  from fn (Tuple a args) = from (fnCurry fn a) args
-
-instance isoArrFnS :: (Isomorphic f (Fn args ret)) => Isomorphic (a -> f) (Fn (Tuple a args) ret) where
-  to   = fnUncurry <<< map to
-  from = map from  <<< fnCurry
+isoArrFnS :: forall a f args ret.
+             Iso f (Fn args ret)
+          -> Iso (a -> f) (Fn (Cons a args) ret)
+isoArrFnS (Iso f g) = Iso (fnUncurry <<< map f) (map g <<< fnCurry)
 
 foreign import fnMap :: forall args a b. (a -> b) -> Fn args a -> Fn args b
 
