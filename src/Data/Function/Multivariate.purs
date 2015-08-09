@@ -10,12 +10,16 @@ module Data.Function.Multivariate
   , Cons(), Nil()
   , fnCurry
   , fnUncurry
+  , isoConstFnZ
+  , isoArrFnZ
+  , isoArrFnS
+  , isoUncurriedFnS
   ) where
 
 import Prelude
 
 import Data.Tuple (Tuple(..))
-import Data.Iso (Iso(..))
+import Data.Iso   (Iso(..), forwards, backwards)
 
 foreign import data Fn :: * -> * -> *
 
@@ -31,10 +35,7 @@ foreign import fnUncurry :: forall args ret a. (a -> Fn args ret) -> Fn (Cons a 
 type Cons = Tuple
 type Nil = Unit
 
--- | Currently one of two options for converting to and from multivariate
--- | functions. This is probably more reliable in terms of avoiding type
--- | ambiguity, but may not be as flexible as `Isomorphic` for direct
--- | conversion of PureScript functions.
+-- | Convert between multivariate and uncurried functions.
 class Multivariate a where
   toMulti :: forall r. (a -> r) -> Fn a r
   fromMulti :: forall r. Fn a r -> a -> r
@@ -47,18 +48,18 @@ instance multiCurry :: (Multivariate args) => Multivariate (Tuple a args) where
   toMulti f = fnUncurry \a -> toMulti \args -> f (Tuple a args)
   fromMulti fn (Tuple a args) = fromMulti (fnCurry fn a) args
 
-isoConstFnZ :: forall ret. Isomorphic ret (Fn Unit ret) where
+isoConstFnZ :: forall ret. Iso ret (Fn Nil ret)
 isoConstFnZ = Iso pure getConst
 
-isoArrFnZ :: forall ret. Iso (Unit -> ret) (Fn Unit ret)
+isoArrFnZ :: forall ret. Iso (Unit -> ret) (Fn Nil ret)
 isoArrFnZ = Iso (pure <<< ($ unit)) (const <<< getConst)
 
-isoCurriedFnS :: forall a b c args ret.
+isoUncurriedFnS :: forall a b c args ret.
                  Iso (b -> c) (Fn args ret)
               -> Iso (Tuple a b -> c) (Fn (Cons a args) ret)
-isoCurriedFnS = Iso to from
-  where to f                   = fnUncurry \a -> to \args -> f (Tuple a args)
-        from fn (Tuple a args) = from (fnCurry fn a) args
+isoUncurriedFnS iso = Iso to from
+  where to f = fnUncurry \a -> forwards iso \args -> f (Tuple a args)
+        from fn (Tuple a args) = backwards iso (fnCurry fn a) args
 
 isoArrFnS :: forall a f args ret.
              Iso f (Fn args ret)
